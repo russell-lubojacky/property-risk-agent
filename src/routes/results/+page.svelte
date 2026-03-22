@@ -31,11 +31,16 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
     compositeScore: 68,
   };
 
-  const riskFactors = [
-    { label: 'Flooding',        value: 'High Risk',   score: 78, severity: 'high' },
-    { label: 'Seismic',         value: 'Low Risk',    score: 22, severity: 'low' },
-    { label: 'Infrastructure',  value: 'Favorable',   score: 18, severity: 'low' },
-    { label: 'Safety',          value: 'Moderate',    score: 55, severity: 'medium' },
+  // riskFactors — Safety entry is updated reactively once crime data loads
+  let safetyScore = 55;
+  let safetySeverity = 'medium';
+  let safetyValue = 'Moderate';
+
+  $: riskFactors = [
+    { label: 'Flooding',        value: 'High Risk',   score: 78,           severity: 'high' },
+    { label: 'Seismic',         value: 'Low Risk',    score: 22,           severity: 'low' },
+    { label: 'Infrastructure',  value: 'Favorable',   score: 18,           severity: 'low' },
+    { label: 'Safety',          value: safetyValue,   score: safetyScore,  severity: safetySeverity },
   ];
 
   // Flood details — populated from the FEMA NFHL API on mount
@@ -48,46 +53,91 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
   };
 
   onMount(async () => {
-    try {
-      const res = await fetch(`/api/flood?address=${encodeURIComponent(address)}`);
-      if (!res.ok) throw new Error(`API error ${res.status}`);
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+    // Fetch flood and crime data concurrently
+    const [floodResult, crimeResult] = await Promise.allSettled([
+      fetch(`/api/flood?address=${encodeURIComponent(address)}`).then(r => r.json()),
+      fetch(`/api/crime?address=${encodeURIComponent(address)}`).then(r => r.json()),
+    ]);
 
+    // --- Flood ---
+    if (floodResult.status === 'fulfilled' && !floodResult.value.error) {
+      const data = floodResult.value;
       const zoneLabel = data.subtype
         ? `Zone ${data.zone} — ${data.subtype}`
         : `Zone ${data.zone}`;
-
       const elevationText = data.staticBFE != null
         ? `Base flood elevation: ${data.staticBFE.toFixed(1)} ft NAVD88`
         : data.zone === 'X'
           ? 'No base flood elevation — minimal flood hazard area'
           : 'Base flood elevation not available in NFHL record';
-
-      floodDetails = {
-        zone: zoneLabel,
-        finding: data.description,
-        elevation: elevationText,
-      };
-    } catch (err) {
-      floodError = err.message;
+      floodDetails = { zone: zoneLabel, finding: data.description, elevation: elevationText };
+    } else {
+      const msg = floodResult.status === 'rejected'
+        ? floodResult.reason?.message
+        : floodResult.value?.error;
+      floodError = msg ?? 'Unknown error';
       floodDetails = {
         zone: 'Unavailable',
         finding: 'Could not retrieve FEMA flood zone data. Please try again later.',
         elevation: '',
       };
-    } finally {
-      floodLoading = false;
     }
+    floodLoading = false;
+
+    // --- Crime / Safety ---
+    if (crimeResult.status === 'fulfilled' && !crimeResult.value.error) {
+      const data = crimeResult.value;
+      crimeDetails = {
+        score: data.crimeScore,
+        severityLabel: data.severityLabel,
+        violentRate: data.violentCrimeRate,
+        propertyRate: data.propertyCrimeRate,
+        nationalAvg: data.nationalAvgViolentRate,
+        countyName: data.countyName,
+        dataYear: data.dataYear,
+        note: null,
+      };
+      safetyScore = data.crimeScore;
+      safetySeverity = data.severity;
+      safetyValue = data.severityLabel;
+    } else {
+      const msg = crimeResult.status === 'rejected'
+        ? crimeResult.reason?.message
+        : crimeResult.value?.error;
+      crimeError = msg ?? 'Unknown error';
+      crimeDetails = {
+        score: null,
+        severityLabel: 'Unavailable',
+        violentRate: null,
+        propertyRate: null,
+        nationalAvg: null,
+        countyName: '',
+        dataYear: null,
+        note: 'Could not retrieve crime data. Please try again later.',
+      };
+    }
+    crimeLoading = false;
   });
+
+  // Crime / Safety — populated from the FBI CDE API on mount
+  let crimeLoading = true;
+  let crimeError = null;
+  let crimeDetails = {
+    score: null,
+    severityLabel: '—',
+    violentRate: null,
+    propertyRate: null,
+    nationalAvg: null,
+    countyName: '',
+    dataYear: null,
+    note: 'Loading crime index data from FBI Crime Data Explorer…',
+  };
 
   const infraDetails = {
     gridStatus: '2021 "Resilience Plus" upgrade — redundant dual-feed supply.',
     roadAccess: 'Grade A — two arterial routes within 0.3 mi.',
     maintenance: 'Fire station 0.4 mi · Hospital 1.1 mi',
   };
-
-  const safetyNote = 'Public service response times have increased during environmental events within the surrounding 0.5-mile radius.';
 
   const incidents = [
     { type: 'flood',      label: 'Major surface flooding',    distance: '0.2 mi', timeAgo: '4 days ago' },
@@ -232,9 +282,45 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
 
       <!-- Safety -->
       <section class="card sidebar-section">
-        <div class="sidebar-section__badge sidebar-section__badge--medium">MODERATE</div>
-        <h2 class="sidebar-section__title">Safety</h2>
-        <p class="sidebar-section__desc">{safetyNote}</p>
+        {#if !crimeLoading}
+          <div class="sidebar-section__badge sidebar-section__badge--{crimeError ? 'medium' : crimeDetails.severityLabel === 'High Risk' ? 'high' : crimeDetails.severityLabel === 'Low Risk' ? 'low' : 'medium'}">
+            {crimeError ? 'UNAVAILABLE' : crimeDetails.severityLabel.toUpperCase()}
+          </div>
+        {/if}
+        <h2 class="sidebar-section__title">Safety &amp; Crime Index</h2>
+        {#if crimeLoading}
+          <p class="sidebar-section__note crime-loading">Fetching FBI crime data…</p>
+        {:else if crimeError}
+          <p class="sidebar-section__desc">{crimeDetails.note}</p>
+          {#if crimeError.includes('FBI_UCR_API_KEY')}
+            <p class="sidebar-section__note">Configure <code>FBI_UCR_API_KEY</code> to enable live crime data.</p>
+          {/if}
+        {:else}
+          <div class="detail-pill">
+            <span class="data-label">Crime Index Score</span>
+            <span class="detail-pill__value">{crimeDetails.score} / 100</span>
+          </div>
+          <div class="crime-rates">
+            <div class="crime-rate-row">
+              <span class="data-label">Violent Crime Rate</span>
+              <span class="crime-rate-val">{crimeDetails.violentRate} per 100k</span>
+            </div>
+            <div class="crime-rate-row">
+              <span class="data-label">Property Crime Rate</span>
+              <span class="crime-rate-val">{crimeDetails.propertyRate} per 100k</span>
+            </div>
+            <div class="crime-rate-row">
+              <span class="data-label">National Avg (Violent)</span>
+              <span class="crime-rate-val">{crimeDetails.nationalAvg} per 100k</span>
+            </div>
+          </div>
+          {#if crimeDetails.countyName}
+            <p class="sidebar-section__note">County: {crimeDetails.countyName}</p>
+          {/if}
+          <p class="sidebar-section__note crime-source">
+            Source: FBI Crime Data Explorer · {crimeDetails.dataYear} data · Annual refresh
+          </p>
+        {/if}
       </section>
     </aside>
 
@@ -643,6 +729,35 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
   }
 
   .flood-source {
+    color: var(--outline);
+    font-size: var(--text-label-sm);
+    margin-top: var(--space-1);
+  }
+
+  .crime-loading {
+    font-style: italic;
+    color: var(--outline);
+  }
+
+  .crime-rates {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .crime-rate-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .crime-rate-val {
+    font-size: var(--text-body-sm);
+    color: var(--on-surface-variant);
+    font-weight: 500;
+  }
+
+  .crime-source {
     color: var(--outline);
     font-size: var(--text-label-sm);
     margin-top: var(--space-1);
