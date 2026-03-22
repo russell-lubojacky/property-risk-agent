@@ -121,15 +121,15 @@ async function geocodeWithFips(address) {
  */
 async function queryFbiCrime(fips5, apiKey) {
   const year = 2022;
-  const qs = `year=${year}&api_key=${apiKey}`;
+  const qs = `year=${year}&API_KEY=${apiKey}`;
 
   const [violentRes, propertyRes] = await Promise.all([
     fetch(`${FBI_CDE_BASE_URL}/estimate/county/${fips5}?variable=violent-crime&${qs}`, {
-      headers: { 'User-Agent': 'PropertyRiskAgent/1.0', 'X-Api-Key': apiKey },
+      headers: { 'User-Agent': 'PropertyRiskAgent/1.0' },
       signal: AbortSignal.timeout(15_000),
     }),
     fetch(`${FBI_CDE_BASE_URL}/estimate/county/${fips5}?variable=property-crime&${qs}`, {
-      headers: { 'User-Agent': 'PropertyRiskAgent/1.0', 'X-Api-Key': apiKey },
+      headers: { 'User-Agent': 'PropertyRiskAgent/1.0' },
       signal: AbortSignal.timeout(15_000),
     }),
   ]);
