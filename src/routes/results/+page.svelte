@@ -4,6 +4,7 @@
   // Property: 456 Main St, Houston, TX 77002
 
   import { page } from '$app/stores';
+  import { onMount } from 'svelte';
   import RiskScoreBadge from '$lib/components/RiskScoreBadge.svelte';
   import IncidentTag from '$lib/components/IncidentTag.svelte';
   import RiskFactorRow from '$lib/components/RiskFactorRow.svelte';
@@ -37,11 +38,48 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
     { label: 'Safety',          value: 'Moderate',    score: 55, severity: 'medium' },
   ];
 
-  const floodDetails = {
-    zone: 'Zone AE (1% Annual)',
-    finding: 'Significant increase in surface-water runoff vulnerability due to proximity to low-lying drainage basins.',
-    elevation: 'Base flood elevation: 12.4 ft NAVD88',
+  // Flood details — populated from the FEMA NFHL API on mount
+  let floodLoading = true;
+  let floodError = null;
+  let floodDetails = {
+    zone: '—',
+    finding: 'Loading flood zone data from FEMA National Flood Hazard Layer…',
+    elevation: '',
   };
+
+  onMount(async () => {
+    try {
+      const res = await fetch(`/api/flood?address=${encodeURIComponent(address)}`);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      const zoneLabel = data.subtype
+        ? `Zone ${data.zone} — ${data.subtype}`
+        : `Zone ${data.zone}`;
+
+      const elevationText = data.staticBFE != null
+        ? `Base flood elevation: ${data.staticBFE.toFixed(1)} ft NAVD88`
+        : data.zone === 'X'
+          ? 'No base flood elevation — minimal flood hazard area'
+          : 'Base flood elevation not available in NFHL record';
+
+      floodDetails = {
+        zone: zoneLabel,
+        finding: data.description,
+        elevation: elevationText,
+      };
+    } catch (err) {
+      floodError = err.message;
+      floodDetails = {
+        zone: 'Unavailable',
+        finding: 'Could not retrieve FEMA flood zone data. Please try again later.',
+        elevation: '',
+      };
+    } finally {
+      floodLoading = false;
+    }
+  });
 
   const infraDetails = {
     gridStatus: '2021 "Resilience Plus" upgrade — redundant dual-feed supply.',
@@ -121,7 +159,7 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
           </svg>
           Save to Portfolio
         </button>
-        <a href="/map" class="btn-tertiary">
+        <a href="/map?address={encodeURIComponent(address)}" class="btn-tertiary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <polygon points="3 11 22 2 13 21 11 13 3 11"/>
           </svg>
@@ -157,12 +195,19 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
       <section class="card sidebar-section">
         <div class="sidebar-section__badge sidebar-section__badge--high">HIGH RISK</div>
         <h2 class="sidebar-section__title">Flood Assessment</h2>
-        <div class="detail-pill">
-          <span class="data-label">FEMA Zone</span>
-          <span class="detail-pill__value">{floodDetails.zone}</span>
-        </div>
-        <p class="sidebar-section__desc">{floodDetails.finding}</p>
-        <p class="sidebar-section__note">{floodDetails.elevation}</p>
+        {#if floodLoading}
+          <p class="sidebar-section__note flood-loading">Fetching FEMA data…</p>
+        {:else}
+          <div class="detail-pill">
+            <span class="data-label">FEMA Zone</span>
+            <span class="detail-pill__value">{floodDetails.zone}</span>
+          </div>
+          <p class="sidebar-section__desc">{floodDetails.finding}</p>
+          {#if floodDetails.elevation}
+            <p class="sidebar-section__note">{floodDetails.elevation}</p>
+          {/if}
+          <p class="sidebar-section__note flood-source">Source: FEMA National Flood Hazard Layer</p>
+        {/if}
       </section>
 
       <!-- Infrastructure -->
@@ -208,7 +253,7 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
           <span class="data-label">Property Location</span>
           <span class="map-placeholder__address">{property.address}, {property.city}</span>
         </div>
-        <a href="/map" class="map-placeholder__expand btn-secondary">Open Full Map →</a>
+        <a href="/map?address={encodeURIComponent(address)}" class="map-placeholder__expand btn-secondary">Open Full Map →</a>
       </section>
 
       <!-- AI-Generated Property Summary -->
@@ -590,5 +635,16 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
     font-size: var(--text-body-md);
     color: var(--on-surface-variant);
     line-height: 1.6;
+  }
+
+  .flood-loading {
+    font-style: italic;
+    color: var(--outline);
+  }
+
+  .flood-source {
+    color: var(--outline);
+    font-size: var(--text-label-sm);
+    margin-top: var(--space-1);
   }
 </style>

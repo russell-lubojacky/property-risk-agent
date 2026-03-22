@@ -3,6 +3,8 @@
   // Corresponds to "Detail Map View - Property Risk Agent" Stitch screen
   // Property: 2401 Westheimer Rd, Houston, TX 77098 · Risk Score 82/100
 
+  import { onMount } from 'svelte';
+  import { page } from '$app/stores';
   import RiskScoreBadge from '$lib/components/RiskScoreBadge.svelte';
 
   // TODO: Integrate a real map library here.
@@ -13,16 +15,49 @@
   //     npm install mapbox-gl
   // The `.map-canvas` div below is the mount point.
 
+  // Address comes from query string if navigated from results, else falls back to default
+  $: mapAddress = $page.url.searchParams.get('address') ?? '2401 Westheimer Rd, Houston, TX 77098';
+
   const property = {
     address: '2401 Westheimer Rd',
     city: 'Houston, TX 77098',
     neighborhood: 'River Oaks District',
     riskScore: 82,
     insuranceTier: 'C4',
-    floodZone: 'Zone AE',
-    floodNote: 'Base flood elevation exceeds local street grade by 1.2 ft',
     gridStatus: 'Dual-redundancy connections — Grid Resilience: High',
   };
+
+  // Flood data — populated from FEMA NFHL API on mount
+  let floodLoading = true;
+  let floodZone = '—';
+  let floodNote = 'Fetching flood zone from FEMA…';
+  let floodZoneTag = 'Zone — Flood';
+
+  onMount(async () => {
+    try {
+      const res = await fetch(`/api/flood?address=${encodeURIComponent(mapAddress)}`);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      floodZone = data.subtype ? `Zone ${data.zone} — ${data.subtype}` : `Zone ${data.zone}`;
+      floodZoneTag = `Zone ${data.zone} Flood`;
+
+      if (data.staticBFE != null) {
+        floodNote = `Base flood elevation: ${data.staticBFE.toFixed(1)} ft NAVD88`;
+      } else if (data.zone === 'X') {
+        floodNote = 'Minimal flood hazard — outside 1% annual chance floodplain';
+      } else {
+        floodNote = data.description;
+      }
+    } catch (_) {
+      floodZone = 'Unavailable';
+      floodNote = 'Could not retrieve FEMA flood zone data.';
+      floodZoneTag = 'Flood Zone N/A';
+    } finally {
+      floodLoading = false;
+    }
+  });
 
   let searchQuery = '';
 
@@ -174,7 +209,12 @@
 
       <div class="highlight-item highlight-item--high">
         <span class="data-label highlight-item__cat">Flood</span>
-        <p class="highlight-item__note">{property.floodZone} — {property.floodNote}</p>
+        {#if floodLoading}
+          <p class="highlight-item__note flood-loading-note">Fetching FEMA data…</p>
+        {:else}
+          <p class="highlight-item__note">{floodZone} — {floodNote}</p>
+          <p class="highlight-item__source">Source: FEMA National Flood Hazard Layer</p>
+        {/if}
       </div>
 
       <div class="highlight-item highlight-item--low">
@@ -246,7 +286,7 @@
         </div>
 
         <div class="map-detail-panel__tags">
-          <span class="map-detail-tag map-detail-tag--high">⚠ Zone AE Flood</span>
+          <span class="map-detail-tag map-detail-tag--high">⚠ {floodLoading ? 'Loading…' : floodZoneTag}</span>
           <span class="map-detail-tag map-detail-tag--low">✓ Grid Resilient</span>
         </div>
 
@@ -777,6 +817,17 @@
     border: none;
     border-top: 1px solid rgba(194, 198, 216, 0.15);
     margin: 0;
+  }
+
+  .flood-loading-note {
+    font-style: italic;
+    color: var(--outline);
+  }
+
+  .highlight-item__source {
+    font-size: 10px;
+    color: var(--outline);
+    margin-top: 2px;
   }
 
   /* Attribution */
