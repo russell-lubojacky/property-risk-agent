@@ -31,16 +31,20 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
     compositeScore: 68,
   };
 
-  // riskFactors — Safety entry is updated reactively once crime data loads
+  // riskFactors — Infrastructure and Safety entries are updated reactively once data loads
   let safetyScore = 55;
   let safetySeverity = 'medium';
   let safetyValue = 'Moderate';
 
+  let infraScore = 50;
+  let infraSeverity = 'medium';
+  let infraValue = 'Loading…';
+
   $: riskFactors = [
-    { label: 'Flooding',        value: 'High Risk',   score: 78,           severity: 'high' },
-    { label: 'Seismic',         value: 'Low Risk',    score: 22,           severity: 'low' },
-    { label: 'Infrastructure',  value: 'Favorable',   score: 18,           severity: 'low' },
-    { label: 'Safety',          value: safetyValue,   score: safetyScore,  severity: safetySeverity },
+    { label: 'Flooding',        value: 'High Risk',   score: 78,          severity: 'high' },
+    { label: 'Seismic',         value: 'Low Risk',    score: 22,          severity: 'low' },
+    { label: 'Infrastructure',  value: infraValue,    score: infraScore,  severity: infraSeverity },
+    { label: 'Safety',          value: safetyValue,   score: safetyScore, severity: safetySeverity },
   ];
 
   // Flood details — populated from the FEMA NFHL API on mount
@@ -53,10 +57,11 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
   };
 
   onMount(async () => {
-    // Fetch flood and crime data concurrently
-    const [floodResult, crimeResult] = await Promise.allSettled([
+    // Fetch flood, crime, and infrastructure data concurrently
+    const [floodResult, crimeResult, infraResult] = await Promise.allSettled([
       fetch(`/api/flood?address=${encodeURIComponent(address)}`).then(r => r.json()),
       fetch(`/api/crime?address=${encodeURIComponent(address)}`).then(r => r.json()),
+      fetch(`/api/infrastructure?address=${encodeURIComponent(address)}`).then(r => r.json()),
     ]);
 
     // --- Flood ---
@@ -117,6 +122,39 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
       };
     }
     crimeLoading = false;
+
+    // --- Infrastructure ---
+    if (infraResult.status === 'fulfilled' && !infraResult.value.error) {
+      const data = infraResult.value;
+      infraDetails = {
+        gridStatus: `State SAIDI ${data.gridSaidi} min/yr · Grid score ${data.gridResilienceScore}/100 (${data.gridDataYear} EIA data)`,
+        roadAccess: `Grade ${data.roadAccessGrade} — ${data.totalRoadsNearby ?? '?'} major road segment${data.totalRoadsNearby !== 1 ? 's' : ''} within 500 m`,
+        score: data.infrastructureScore,
+        severityLabel: data.severityLabel,
+        state: data.state,
+        sources: data.sources,
+        note: null,
+      };
+      infraScore = data.infrastructureScore;
+      infraSeverity = data.severity;
+      infraValue = data.severityLabel;
+    } else {
+      const msg = infraResult.status === 'rejected'
+        ? infraResult.reason?.message
+        : infraResult.value?.error;
+      infraError = msg ?? 'Unknown error';
+      infraDetails = {
+        gridStatus: null,
+        roadAccess: null,
+        score: null,
+        severityLabel: 'Unavailable',
+        state: null,
+        sources: null,
+        note: 'Could not retrieve infrastructure data. Please try again later.',
+      };
+      infraValue = 'Unavailable';
+    }
+    infraLoading = false;
   });
 
   // Crime / Safety — populated from the FBI CDE API on mount
@@ -133,10 +171,17 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
     note: 'Loading crime index data from FBI Crime Data Explorer…',
   };
 
-  const infraDetails = {
-    gridStatus: '2021 "Resilience Plus" upgrade — redundant dual-feed supply.',
-    roadAccess: 'Grade A — two arterial routes within 0.3 mi.',
-    maintenance: 'Fire station 0.4 mi · Hospital 1.1 mi',
+  // Infrastructure — populated from the EIA/OSM API on mount
+  let infraLoading = true;
+  let infraError = null;
+  let infraDetails = {
+    gridStatus: null,
+    roadAccess: null,
+    score: null,
+    severityLabel: '—',
+    state: null,
+    sources: null,
+    note: 'Loading infrastructure data…',
   };
 
   const incidents = [
@@ -262,22 +307,39 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
 
       <!-- Infrastructure -->
       <section class="card sidebar-section">
-        <div class="sidebar-section__badge sidebar-section__badge--low">FAVORABLE</div>
-        <h2 class="sidebar-section__title">Infrastructure</h2>
-        <div class="infra-rows">
-          <div class="infra-row">
-            <span class="data-label">Power Grid</span>
-            <span class="infra-row__val">{infraDetails.gridStatus}</span>
+        {#if !infraLoading}
+          <div class="sidebar-section__badge sidebar-section__badge--{infraError ? 'medium' : infraDetails.severityLabel === 'High Risk' ? 'high' : infraDetails.severityLabel === 'Low Risk' || infraDetails.severityLabel === 'Favorable' ? 'low' : 'medium'}">
+            {infraError ? 'UNAVAILABLE' : infraDetails.severityLabel.toUpperCase()}
           </div>
-          <div class="infra-row">
-            <span class="data-label">Road Access</span>
-            <span class="infra-row__val">{infraDetails.roadAccess}</span>
+        {/if}
+        <h2 class="sidebar-section__title">Infrastructure Integrity</h2>
+        {#if infraLoading}
+          <p class="sidebar-section__note infra-loading">Loading infrastructure data…</p>
+        {:else if infraError}
+          <p class="sidebar-section__desc">{infraDetails.note}</p>
+        {:else}
+          <div class="detail-pill">
+            <span class="data-label">Infrastructure Score</span>
+            <span class="detail-pill__value">{infraDetails.score} / 100</span>
           </div>
-          <div class="infra-row">
-            <span class="data-label">Proximity</span>
-            <span class="infra-row__val">{infraDetails.maintenance}</span>
+          <div class="infra-rows">
+            {#if infraDetails.gridStatus}
+              <div class="infra-row">
+                <span class="data-label">Power Grid</span>
+                <span class="infra-row__val">{infraDetails.gridStatus}</span>
+              </div>
+            {/if}
+            {#if infraDetails.roadAccess}
+              <div class="infra-row">
+                <span class="data-label">Road Access</span>
+                <span class="infra-row__val">{infraDetails.roadAccess}</span>
+              </div>
+            {/if}
           </div>
-        </div>
+          {#if infraDetails.sources}
+            <p class="sidebar-section__note infra-source">Source: {infraDetails.sources}</p>
+          {/if}
+        {/if}
       </section>
 
       <!-- Safety -->
@@ -758,6 +820,17 @@ Mitigation priority should focus on lower-level waterproofing, an updated elevat
   }
 
   .crime-source {
+    color: var(--outline);
+    font-size: var(--text-label-sm);
+    margin-top: var(--space-1);
+  }
+
+  .infra-loading {
+    font-style: italic;
+    color: var(--outline);
+  }
+
+  .infra-source {
     color: var(--outline);
     font-size: var(--text-label-sm);
     margin-top: var(--space-1);
