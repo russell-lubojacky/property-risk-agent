@@ -11,27 +11,65 @@ on:
     types: [created]
 
 jobs:
+  # ── Guard ──────────────────────────────────────────────────────────────────
+  # For comment-triggered runs, verify the commenter has at least Write access
+  # before doing any real work. Assignment and label triggers are inherently
+  # safe (only collaborators with Write/Triage access can do those actions).
+  check-permission:
+    name: Verify actor has write access
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check collaborator permission
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # For non-comment events the actor already has write access by definition.
+          if [[ "${{ github.event_name }}" != "issue_comment" ]]; then
+            echo "allowed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          ACTOR="${{ github.actor }}"
+          REPO="${{ github.repository }}"
+          PERMISSION=$(gh api repos/$REPO/collaborators/$ACTOR/permission \
+            --jq '.permission' 2>/dev/null || echo "none")
+
+          # Allow write, maintain, or admin — block read/none (outside contributors)
+          if [[ "$PERMISSION" == "write" || "$PERMISSION" == "maintain" || "$PERMISSION" == "admin" ]]; then
+            echo "allowed=true" >> $GITHUB_OUTPUT
+          else
+            echo "allowed=false" >> $GITHUB_OUTPUT
+            echo "::warning::@claude triggered by $ACTOR who has '$PERMISSION' access — skipping."
+          fi
+
+  # ── Implementation ─────────────────────────────────────────────────────────
   implement:
     name: Implement issue with Claude
     runs-on: ubuntu-latest
+    needs: check-permission
 
-    # Trigger conditions:
-    #   - assigned to claude[bot]
-    #   - claude-implement label added
-    #   - @claude mentioned in an issue comment (not a PR comment)
+    # Trigger conditions (all require the permission guard above to pass):
+    #   - assigned to claude[bot]            (Write access required to assign)
+    #   - claude-implement label added        (Triage access required to label)
+    #   - @claude mentioned in issue comment  (Write access verified by guard above)
     if: |
-      (
-        github.event_name == 'issues' &&
-        github.event.action == 'assigned' &&
-        github.event.assignee.login == 'claude[bot]'
-      ) || (
-        github.event_name == 'issues' &&
-        github.event.action == 'labeled' &&
-        github.event.label.name == 'claude-implement'
-      ) || (
-        github.event_name == 'issue_comment' &&
-        github.event.issue.pull_request == null &&
-        contains(github.event.comment.body, '@claude')
+      needs.check-permission.outputs.allowed == 'true' && (
+        (
+          github.event_name == 'issues' &&
+          github.event.action == 'assigned' &&
+          github.event.assignee.login == 'claude[bot]'
+        ) || (
+          github.event_name == 'issues' &&
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'claude-implement'
+        ) || (
+          github.event_name == 'issue_comment' &&
+          github.event.issue.pull_request == null &&
+          contains(github.event.comment.body, '@claude')
+        )
       )
 
     permissions:
@@ -52,9 +90,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Resolve the issue number/title/body consistently across all three trigger types.
-      # - issues events:       github.event.issue.*
-      # - issue_comment events: github.event.issue.*  (same structure)
+      # Resolve the issue number/title consistently across all three trigger types.
+      # Both issues and issue_comment events expose github.event.issue.*
       - name: Resolve issue context
         id: issue
         run: |
