@@ -9,7 +9,7 @@ const cache = new Map();
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 const FEMA_NFHL_URL =
-  'https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query';
+  'https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query';
 
 const CENSUS_GEOCODER_URL =
   'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress';
