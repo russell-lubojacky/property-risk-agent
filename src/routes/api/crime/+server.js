@@ -121,7 +121,7 @@ async function geocodeWithFips(address) {
  */
 async function queryFbiCrime(fips5, apiKey) {
   const year = 2022;
-  const qs = `year=${year}&API_KEY=${apiKey}`;
+  const qs = `year=${year}&api_key=${apiKey}`;
 
   const [violentRes, propertyRes] = await Promise.all([
     fetch(`${FBI_CDE_BASE_URL}/estimate/county/${fips5}?variable=violent-crime&${qs}`, {
