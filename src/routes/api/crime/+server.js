@@ -125,11 +125,11 @@ async function queryFbiCrime(fips5, apiKey) {
 
   const [violentRes, propertyRes] = await Promise.all([
     fetch(`${FBI_CDE_BASE_URL}/estimate/county/${fips5}?variable=violent-crime&${qs}`, {
-      headers: { 'User-Agent': 'PropertyRiskAgent/1.0' },
+      headers: { 'User-Agent': 'PropertyRiskAgent/1.0', 'X-Api-Key': apiKey },
       signal: AbortSignal.timeout(15_000),
     }),
     fetch(`${FBI_CDE_BASE_URL}/estimate/county/${fips5}?variable=property-crime&${qs}`, {
-      headers: { 'User-Agent': 'PropertyRiskAgent/1.0' },
+      headers: { 'User-Agent': 'PropertyRiskAgent/1.0', 'X-Api-Key': apiKey },
       signal: AbortSignal.timeout(15_000),
     }),
   ]);
