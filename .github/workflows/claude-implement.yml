@@ -1,12 +1,11 @@
 name: Claude — Implement Issue
 
 # Triggers when:
-#   1. An issue is assigned to claude[bot]  ← primary trigger from GitHub Projects
-#   2. Someone comments @claude on an issue ← manual override
-#   3. The label "claude-implement" is added ← label-based trigger
+#   1. The label "claude-implement" is added  ← primary trigger from GitHub Projects
+#   2. Someone comments @claude on an issue   ← manual trigger from issue page
 on:
   issues:
-    types: [assigned, labeled]
+    types: [labeled]
   issue_comment:
     types: [created]
 
@@ -52,16 +51,11 @@ jobs:
     needs: check-permission
 
     # Trigger conditions (all require the permission guard above to pass):
-    #   - assigned to claude[bot]            (Write access required to assign)
     #   - claude-implement label added        (Triage access required to label)
     #   - @claude mentioned in issue comment  (Write access verified by guard above)
     if: |
       needs.check-permission.outputs.allowed == 'true' && (
         (
-          github.event_name == 'issues' &&
-          github.event.action == 'assigned' &&
-          github.event.assignee.login == 'claude[bot]'
-        ) || (
           github.event_name == 'issues' &&
           github.event.action == 'labeled' &&
           github.event.label.name == 'claude-implement'
