@@ -1,28 +1,37 @@
 name: Claude — Implement Issue
 
-# Triggers when someone comments @claude on an issue,
-# OR when the label "claude-implement" is added to an issue.
+# Triggers when:
+#   1. An issue is assigned to claude[bot]  ← primary trigger from GitHub Projects
+#   2. Someone comments @claude on an issue ← manual override
+#   3. The label "claude-implement" is added ← label-based trigger
 on:
+  issues:
+    types: [assigned, labeled]
   issue_comment:
     types: [created]
-  issues:
-    types: [labeled]
 
 jobs:
   implement:
     name: Implement issue with Claude
     runs-on: ubuntu-latest
 
-    # Only run on issues (not PR comments), and only when @claude is mentioned
-    # or the claude-implement label was just added.
+    # Trigger conditions:
+    #   - assigned to claude[bot]
+    #   - claude-implement label added
+    #   - @claude mentioned in an issue comment (not a PR comment)
     if: |
       (
+        github.event_name == 'issues' &&
+        github.event.action == 'assigned' &&
+        github.event.assignee.login == 'claude[bot]'
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.action == 'labeled' &&
+        github.event.label.name == 'claude-implement'
+      ) || (
         github.event_name == 'issue_comment' &&
         github.event.issue.pull_request == null &&
         contains(github.event.comment.body, '@claude')
-      ) || (
-        github.event_name == 'issues' &&
-        github.event.label.name == 'claude-implement'
       )
 
     permissions:
@@ -43,6 +52,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Resolve the issue number/title/body consistently across all three trigger types.
+      # - issues events:       github.event.issue.*
+      # - issue_comment events: github.event.issue.*  (same structure)
+      - name: Resolve issue context
+        id: issue
+        run: |
+          echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          echo "title=${{ github.event.issue.title }}" >> $GITHUB_OUTPUT
+
       - name: Implement issue with Claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -53,20 +71,21 @@ jobs:
             You are an expert SvelteKit/Svelte 5 engineer implementing a GitHub issue for the Property Risk Agent project.
 
             ## Issue to implement
-            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+            Issue #${{ steps.issue.outputs.number }}: ${{ steps.issue.outputs.title }}
 
-            Issue description:
-            ${{ github.event.issue.body }}
+            Fetch the full issue body by running:
+              gh issue view ${{ steps.issue.outputs.number }} --repo ${{ github.repository }}
 
             ## Instructions
-            1. Create a new branch named `claude/issue-${{ github.event.issue.number }}` from main.
-            2. Read the existing code carefully before making changes. Follow the patterns already established in the codebase (SvelteKit 2, Svelte 5, CSS custom properties design system).
-            3. Implement the changes described in the issue. Keep changes focused — do not refactor unrelated code.
-            4. Run `npm run build` to verify the code compiles without errors. Fix any build errors before continuing.
-            5. Run `npm run check` to catch type errors.
-            6. Open a pull request to `main` with:
+            1. Read the full issue body using the command above before doing anything else.
+            2. Create a new branch named `claude/issue-${{ steps.issue.outputs.number }}` from main.
+            3. Read the existing code carefully before making changes. Follow the patterns already established in the codebase (SvelteKit 2, Svelte 5, CSS custom properties design system).
+            4. Implement the changes described in the issue. Keep changes focused — do not refactor unrelated code.
+            5. Run `npm run build` to verify the code compiles without errors. Fix any build errors before continuing.
+            6. Run `npm run check` to catch type errors.
+            7. Open a pull request to `main` with:
                - Title: same as the issue title
-               - Body: a clear description of what was changed and why, ending with `Closes #${{ github.event.issue.number }}`
+               - Body: a clear description of what was changed and why, ending with `Closes #${{ steps.issue.outputs.number }}`
                - Add the label `claude-review` to trigger automated peer review
 
             ## Project context
@@ -77,4 +96,4 @@ jobs:
             - Build command: `npm run build`
             - Check command: `npm run check`
 
-            Post a comment on issue #${{ github.event.issue.number }} when you start work, and another when the PR is opened.
+            Post a comment on issue #${{ steps.issue.outputs.number }} when you start work, and another when the PR is opened.
