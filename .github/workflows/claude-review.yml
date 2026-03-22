@@ -1,0 +1,83 @@
+name: Claude — Peer Review & Merge
+
+# Triggers when a PR is opened or the "claude-review" label is added.
+# Designed to review PRs created by the Claude implementation agent.
+on:
+  pull_request:
+    types: [opened, labeled]
+    branches: [main]
+
+jobs:
+  review:
+    name: Peer review PR with Claude
+    runs-on: ubuntu-latest
+
+    # Only review PRs from claude/* branches or those explicitly labelled claude-review
+    if: |
+      startsWith(github.event.pull_request.head.ref, 'claude/') ||
+      contains(github.event.pull_request.labels.*.name, 'claude-review')
+
+    permissions:
+      contents: write        # merge the PR
+      pull-requests: write   # approve / request changes / comment
+      issues: write          # comment on linked issues
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify build passes
+        id: build
+        run: npm run build 2>&1 | tee build.log; echo "exit=$?" >> $GITHUB_OUTPUT
+
+      - name: Peer review with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: "--max-turns 20 --model claude-sonnet-4-6"
+          prompt: |
+            You are a senior SvelteKit engineer performing a peer code review for the Property Risk Agent project.
+
+            ## PR to review
+            PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
+            Branch: `${{ github.event.pull_request.head.ref }}` → `main`
+            Author: ${{ github.event.pull_request.user.login }}
+
+            PR description:
+            ${{ github.event.pull_request.body }}
+
+            Build result: ${{ steps.build.outputs.exit == '0' && 'PASSED ✓' || 'FAILED ✗ — see build.log' }}
+
+            ## Review checklist
+            Use `gh pr diff ${{ github.event.pull_request.number }}` to read the full diff, then evaluate:
+
+            1. **Correctness** — Does the implementation match what the linked issue / PR description asks for?
+            2. **Code quality** — Does it follow existing patterns in the codebase (SvelteKit 2, Svelte 5, CSS custom properties)? No unnecessary complexity or premature abstractions.
+            3. **Build** — The build result is shown above. If it failed, this is a blocking issue.
+            4. **Security** — No XSS, no hardcoded secrets, no unvalidated user input passed to dangerous APIs.
+            5. **Scope** — Changes are focused on the issue. No unrelated refactoring.
+
+            ## Decision rules
+            - If ALL checklist items pass → approve and merge:
+              ```
+              gh pr review ${{ github.event.pull_request.number }} --approve --body "Code review passed. Merging."
+              gh pr merge ${{ github.event.pull_request.number }} --squash --delete-branch
+              ```
+            - If any item fails → request changes (do NOT merge):
+              ```
+              gh pr review ${{ github.event.pull_request.number }} --request-changes --body "<specific, actionable feedback>"
+              ```
+
+            Leave a detailed review comment explaining your decision either way.
+            If you request changes, be specific about what needs to be fixed so the implementation agent can act on it.

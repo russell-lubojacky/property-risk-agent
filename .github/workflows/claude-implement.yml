@@ -1,0 +1,80 @@
+name: Claude — Implement Issue
+
+# Triggers when someone comments @claude on an issue,
+# OR when the label "claude-implement" is added to an issue.
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [labeled]
+
+jobs:
+  implement:
+    name: Implement issue with Claude
+    runs-on: ubuntu-latest
+
+    # Only run on issues (not PR comments), and only when @claude is mentioned
+    # or the claude-implement label was just added.
+    if: |
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request == null &&
+        contains(github.event.comment.body, '@claude')
+      ) || (
+        github.event_name == 'issues' &&
+        github.event.label.name == 'claude-implement'
+      )
+
+    permissions:
+      contents: write        # create branches and push commits
+      pull-requests: write   # open PRs
+      issues: write          # comment on the issue with status updates
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # full history so Claude can understand context
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Implement issue with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: "--max-turns 30 --model claude-sonnet-4-6"
+          prompt: |
+            You are an expert SvelteKit/Svelte 5 engineer implementing a GitHub issue for the Property Risk Agent project.
+
+            ## Issue to implement
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            Issue description:
+            ${{ github.event.issue.body }}
+
+            ## Instructions
+            1. Create a new branch named `claude/issue-${{ github.event.issue.number }}` from main.
+            2. Read the existing code carefully before making changes. Follow the patterns already established in the codebase (SvelteKit 2, Svelte 5, CSS custom properties design system).
+            3. Implement the changes described in the issue. Keep changes focused — do not refactor unrelated code.
+            4. Run `npm run build` to verify the code compiles without errors. Fix any build errors before continuing.
+            5. Run `npm run check` to catch type errors.
+            6. Open a pull request to `main` with:
+               - Title: same as the issue title
+               - Body: a clear description of what was changed and why, ending with `Closes #${{ github.event.issue.number }}`
+               - Add the label `claude-review` to trigger automated peer review
+
+            ## Project context
+            - Framework: SvelteKit 2 + Svelte 5, adapter-node (Linode deployment)
+            - Design system: CSS custom properties in src/app.css ("The Architectural Lens" theme)
+            - Components: src/lib/components/ (NavBar, RiskScoreBadge, RiskFactorRow, IncidentTag)
+            - Routes: src/routes/ (+page.svelte, results/, map/, portfolio/)
+            - Build command: `npm run build`
+            - Check command: `npm run check`
+
+            Post a comment on issue #${{ github.event.issue.number }} when you start work, and another when the PR is opened.
