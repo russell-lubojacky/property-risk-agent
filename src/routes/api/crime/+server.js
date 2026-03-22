@@ -22,9 +22,51 @@ import { json } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 
 /** @type {Map<string, {data: object, cachedAt: number}>} */
-const cache = new Map();
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// Upper bound on the number of cached entries to avoid unbounded memory growth.
+const MAX_CACHE_SIZE = 1000;
+
+// How often to run background cleanup of expired / excess cache entries.
+const CACHE_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+const cache = new Map();
+
+function cleanupCache() {
+  const now = Date.now();
+
+  // Remove entries that have exceeded their TTL.
+  for (const [key, value] of cache) {
+    if (!value || typeof value.cachedAt !== 'number') {
+      cache.delete(key);
+      continue;
+    }
+
+    if (now - value.cachedAt > CACHE_TTL_MS) {
+      cache.delete(key);
+    }
+  }
+
+  // Enforce a maximum cache size by evicting the oldest entries.
+  if (cache.size > MAX_CACHE_SIZE) {
+    const entries = Array.from(cache.entries());
+    entries.sort((a, b) => a[1].cachedAt - b[1].cachedAt);
+    const excess = cache.size - MAX_CACHE_SIZE;
+    for (let i = 0; i < excess; i += 1) {
+      const [oldestKey] = entries[i];
+      cache.delete(oldestKey);
+    }
+  }
+}
+
+// Periodically clean up the cache in long-running processes.
+if (typeof setInterval === 'function') {
+  const interval = setInterval(cleanupCache, CACHE_CLEANUP_INTERVAL_MS);
+  // In Node.js, avoid keeping the event loop alive solely for cache cleanup.
+  if (typeof interval.unref === 'function') {
+    interval.unref();
+  }
+}
 const CENSUS_GEOCODER_URL =
   'https://geocoding.geo.census.gov/geocoder/geographies/onelineaddress';
 const FBI_CDE_BASE_URL = 'https://api.usa.gov/crime/fbi/cde';
