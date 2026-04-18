@@ -1,6 +1,6 @@
 # Property Risk Agent
 
-Institutional-grade geospatial risk analysis for real estate. Property Risk Agent processes thousands of data points — flood plains, seismic activity, infrastructure integrity, and safety metrics — to deliver a single, auditable risk score for any US property. Testing.
+Institutional-grade geospatial risk analysis for real estate. Property Risk Agent processes thousands of data points — flood plains, seismic activity, infrastructure integrity, and safety metrics — to deliver a single, auditable risk score for any US property.
 
 ## Features
 
