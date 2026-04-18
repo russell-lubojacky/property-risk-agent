@@ -40,8 +40,8 @@ jobs:
             echo "Pulling latest code..."
             git pull origin main
 
-            echo "Installing production dependencies..."
-            npm ci --omit=dev
+            echo "Installing dependencies..."
+            npm ci
 
             echo "Building application..."
             npm run build
